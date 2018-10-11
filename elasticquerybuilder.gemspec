@@ -6,7 +6,7 @@ require "elasticquerybuilder/version"
 Gem::Specification.new do |spec|
   spec.name          = "elasticquerybuilder"
   spec.version       = ElasticQueryBuilder::VERSION
-  spec.authors       = ["Ben Hassan"]
+  spec.authors       = ["Comms365"]
   spec.email         = ["ben.hassan@comms365.com"]
 
   spec.summary       = %q{TODO: Write a short summary, because RubyGems requires one.}
