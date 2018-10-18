@@ -1,137 +1,42 @@
 require 'elasticquerybuilder/version'
+require 'elasticquerybuilder/modals'
 
 module ElasticQueryBuilder
+  # main class that generates elastic criteria
   class Engine
     attr_reader :criteria
     def initialize
       @criteria = { query: {} }
-      @keyword = ''
+      @modal = ''
     end
 
     # opts = [{field,value,operation},{field,value,operation}]
     def must
-      @keyword = 'must'
+      @modal = ElasticQueryBuilder::Modals.must
       self
     end
 
+    # used for matching strings
     def term(opts)
-      term = {}
-      prev = @keyword.to_sym
-      if @criteria[:query].include? :bool
-        @criteria[:query][:bool][prev] = [] unless @criteria[:query][:bool].include? prev
-        bool_query = true
-      else
-        bool_query = false
-        @criteria[:query] = []
-      end
-      opts.each do |option, _value|
-        val = option[:value]
-        term[option[:field]] = val
-      end
-      if bool_query
-        @criteria[:query][:bool][prev].push(term: term)
-      else
-        if opts.count > 1
-          @criteria[:query].push(term: term)
-        else
-          @criteria[:query] = { term: {} }
-          @criteria[:query][:term] = term
-        end
-      end
-      self
+      setup_query('term', opts)
     end
 
-    def terms(opts)
-      term = {}
-      prev = @keyword.to_sym
-      if @criteria[:query].include? :bool
-        @criteria[:query][:bool][prev] = [] unless @criteria[:query][:bool].include? prev
-        bool_query = true
-      else
-        bool_query = false
-        @criteria[:query] = []
-      end
-      opts.each do |option, _value|
-        val = handle_operation('in', option[:value])
-        term[option[:field]] = val
-      end
-      if bool_query
-        @criteria[:query][:bool][prev].push(terms: term)
-      else
-        if opts.count > 1
-          @criteria[:query].push(terms: term)
-        else
-          @criteria[:query] = { terms: {} }
-          @criteria[:query][:terms] = term
-        end
-      end
-      self
+    # used for matching a value within an array
+    def terms(opts, default_operator = 'in')
+      setup_query('terms', opts, default_operator)
     end
 
-    def wildcard(opts)
-      wildcard = {}
-      prev = @keyword.to_sym
-      if @criteria[:query].include? :bool
-        @criteria[:query][:bool][prev] = [] unless @criteria[:query][:bool].include? prev
-        bool_query = true
-      else
-        bool_query = false
-        @criteria[:query] = []
-      end
-      opts.each do |option, _value|
-        val = if !option.include? :operation
-                option[:value]
-              else
-                handle_operation(option[:operation], option[:value])
-              end
-        wildcard[option[:field]] = val
-      end
-      if bool_query
-        @criteria[:query][:bool][prev].push(wildcard: wildcard)
-      else
-        if opts.count > 1
-          @criteria[:query].push(wildcard: wildcard)
-        else
-          @criteria[:query] = { wildcard: {} }
-          @criteria[:query][:wildcard] = wildcard
-        end
-      end
-      self
+    # used for wildcards. supports whole wildcard, left and right matching
+    def wildcard(opts, default_operator = 'wildcard')
+      setup_query('wildcard', opts, default_operator)
     end
 
-    def match_on_single_field(opts)
-      match = {}
-      prev = @keyword.to_sym
-      if @criteria[:query].include? :bool
-        @criteria[:query][:bool][prev] = [] unless @criteria[:query][:bool].include? prev
-        bool_query = true
-      else
-        bool_query = false
-        @criteria[:query] = []
-      end
-      opts.each do |option, _value|
-        val = if !option.include? :operation
-                option[:value]
-              else
-                handle_operation(option[:operation], option[:value])
-              end
-        match[option[:field]] = val
-      end
-      if bool_query
-        @criteria[:query][:bool][prev].push(match: match)
-      else
-        if opts.count > 1
-          @criteria[:query].push(match: match)
-        else
-          @criteria[:query] = { match: {} }
-          @criteria[:query][:match] = match
-        end
-      end
-      self
+    def single_match(opts)
+      setup_query('match', opts)
     end
 
     def should
-      @keyword = 'should'
+      @modal = ElasticQueryBuilder::Modals.should
       self
     end
 
@@ -140,21 +45,59 @@ module ElasticQueryBuilder
       self
     end
 
-    # TODO: single wildcard or match not in bool clause
-    # commit when should and must combination working
-    # provide to_searchkick method which allows a formatted criteria to be sent through a relevant model
-    # push version 0.05 to rubygems
-
     private
 
       def handle_operation(operation, value)
         case operation
-        when 'eq' then ''
+        when 'eq' then value
         when 'in' then value.split(',').map(&:to_i)
         when 'wildcard-left' then '*' + value
         when 'wildcard-right' then value + '*'
         when 'wildcard' then '*' + value + '*'
         end
+      end
+
+      def populate_data(opts, default_operator)
+        data = {}
+        opts.each do |option, _value|
+          val = if !option.include? :operation
+                  handle_operation(default_operator, option[:value])
+                else
+                  handle_operation(option[:operation], option[:value])
+                end
+          data[option[:field]] = val
+        end
+        data
+      end
+
+      def setup_query(key, opts, default_operator = 'eq')
+        prev = @modal.to_sym
+        formulate_query_structure(prev, key, opts, default_operator)
+        self
+      end
+
+      def formulate_query_structure(prev, key, opts, default_operator)
+        if @criteria[:query].include? :bool
+          @criteria[:query][:bool][prev] = [] unless @criteria[:query][:bool].include? prev
+          bool_query = true
+        else
+          bool_query = false
+          @criteria[:query] = []
+        end
+        after_formulate_query_structure(prev, bool_query, key, opts, default_operator)
+      end
+
+      def after_formulate_query_structure(prev, bool_query, key, opts, default_operator)
+        data = populate_data(opts, default_operator)
+        if bool_query
+          @criteria[:query][:bool][prev].push(key.to_sym => data)
+        elsif opts.count > 1
+          @criteria[:query].push(key.to_sym => data)
+        else
+          @criteria[:query] = { key.to_sym => {} }
+          @criteria[:query][key.to_sym] = data
+        end
+        bool_query
       end
   end
 end
